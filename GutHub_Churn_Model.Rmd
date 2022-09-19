@@ -1,0 +1,562 @@
+---
+title: "Insurance Customer Churn Predictions - Scott Lee" 
+output: html_document
+Author: Scott Lee
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<br />
+This project examines a set of customer data for an insurance company, in an attempt to predict customer churn (if a given customer will renew their policy).
+<br />
+This r markdown file starts my development of the assignment in full. 
+<br />
+Create logical flow of code from the other r markdown files as appropriate.
+<br />
+## Contents:
+<br />
+1. Comprehensive EDA
+<br />
+2. Describe your choice of model based off of EDA
+<br />
+3. Develop 2 types of models (e.g. logistic regression and KNN)
+<br />
+4. Evaluate models using selected performance measures (at least 2)
+<br />
+   Pick model based off of abover performance meaures to be main model.
+<br />
+5. Use selected model ,identify and discuss the key factors (variable importance)
+  of the selected model
+<br />
+6. Make suggestions/provide commercial insights to marketing based off of these findings
+   Assume a non data science audience. 
+<br />
+
+
+
+## Load libraries that will be used throughout project
+```{r}
+library(car) # for qq plot
+library(caret) # for some functions e.g. findCorrelation()
+library(class) 
+library(ISLR)
+library(tidyverse)
+```
+
+
+## 1. EDA
+In this section of the code we will conduct a preliminary exploritory data analysis (EDA)
+
+```{r}
+#Load in training data and inspect
+train_data <- read.csv("trainSet.csv")
+head(train_data)
+tail(train_data)
+dim(train_data)
+str(train_data)
+```
+
+str() has told us the data types of each variable. Given that labels is the response variable, we know:
+feature_0 to feature 6 are all continuous variables
+Feature_7 to feature_15 are all discrete, however some appear to be ordinal, taking on different values.
+E.g. Feature_7, 9, and 14 (possible 15 as well but will need to explore further to determine)
+
+```{r}
+#Complete the same for the test data just to check the format and everything is the same, however will not conduct and analysis on this as that would be deteremental the integrity of the model.
+test_data <- read.csv("testSet.csv")
+head(test_data)
+tail(test_data)
+dim(test_data)
+str(test_data)
+
+#Everything look ok. Will revisit test data at model implementation. 
+```
+
+### Univeriate Analysis
+
+
+```{r}
+summary(train_data)
+boxplot(train_data)
+```
+
+Looking at the boxplot we can see that a lot of the continuous variables have significant portions of outliers (e.g. features 0,1,3,4). This would impact a later model, and so it may make sense to remove some of these outerlers via applying a IQR factor (ref: https://www.r-bloggers.com/2020/01/how-to-remove-outliers-in-r/). 
+
+Summary stats also show that we may not be dealing with data on the same scale, so we may need to normalize at some point.
+
+Features 7 to 15 seem to be categorical looking at the structure of the data. The below codeblock generates tables to inspect the frequency of discrete variable data.
+```{r}
+#Apply table)to get a understanding of frequency of frequency of discrete variables)
+table(train_data$feature_7)
+table(train_data$feature_8)
+table(train_data$feature_9)
+table(train_data$feature_10)
+table(train_data$feature_11)
+table(train_data$feature_12)
+table(train_data$feature_13)
+table(train_data$feature_14)
+table(train_data$feature_15)
+```
+
+
+Now we'll remove outlines. 
+
+Investigate the impact of removing outlines based off of IQR method
+
+From looking at the boxplots in more detail, Features 0, 1, 3, 4 look to have significant outliers.
+Therefore IQR method will be applied to exclude the outliers.
+Lower end outlier is defined as Q1 - 1.5(IQR), an upper outlier is defined as Q3 + 1.5(IQR)
+
+In the model development I apply the IQR removal of outliers to several features. However as I experimented further, I found that feature_4 was the opnly one that positively impacted the accuracy of the final model with the removal of outliers. My final model reflects this (and is detailed in the final section of this assignment).
+
+```{r}
+
+#Feature_0
+Q_0 <- quantile(train_data$feature_0, probs=c(0.25, 0.75), na.rm = FALSE)
+iqr_0 <- IQR(train_data$feature_0)
+up_0 <- Q_0[2]+1.5*iqr_0
+low_0 <- Q_0[1] - 1.5*iqr_0 
+
+#extract the outliers data
+train_data <- subset(train_data, train_data$feature_0 > low_0 & train_data$feature_0 < up_0)
+
+#Feature 1
+Q_1 <- quantile(train_data$feature_1, probs=c(0.25, 0.75), na.rm = FALSE)
+iqr_1 <- IQR(train_data$feature_1)
+up_1 <- Q_1[2]+1.5*iqr_1
+low_1 <- Q_1[1] - 1.5*iqr_1 
+
+#extract the outliers data
+train_data <- subset(train_data, train_data$feature_1 > low_1 & train_data$feature_1 < up_1)
+
+#Feature 3
+Q_3 <- quantile(train_data$feature_3, probs=c(0.25, 0.75), na.rm = FALSE)
+iqr_3 <- IQR(train_data$feature_3)
+up_3 <- Q_3[2]+1.5*iqr_3
+low_3 <- Q_3[1] - 1.5*iqr_3 
+
+#extract the outliers data
+train_data <- subset(train_data, train_data$feature_3 > low_3 & train_data$feature_3 < up_3)
+
+#Feature 4
+Q_4 <- quantile(train_data$feature_4, probs=c(0.25, 0.75), na.rm = FALSE)
+iqr_4 <- IQR(train_data$feature_4)
+up_4 <- Q_4[2]+1.5*iqr_4
+low_4 <- Q_4[1] - 1.5*iqr_4 
+
+#extract the outliers data
+train_data <- subset(train_data, train_data$feature_4 > low_4 & train_data$feature_4 < up_4)
+```
+
+Applying a boxplot again, the removal of the outliser can be seen. 
+
+```{r}
+boxplot(train_data)
+
+```
+I also want to see the distrubtions of the data to see if any patterns/trends appear. Applying hist() and qq plots()
+```{r}
+qqPlot(train_data$feature_0, main = "QQ Plot")
+hist(train_data$feature_0, n = 40, freq  =FALSE, main = "Histogram of Feature 0", border = "white", col = "steelblue")
+
+```
+
+```{r}
+qqPlot(train_data$feature_1, main = "QQ Plot")
+hist(train_data$feature_1, n = 50, freq  =FALSE, main = "Histogram of Feature 1", border = "white", col = "steelblue")
+
+```
+
+```{r}
+qqPlot(train_data$feature_2, main = "QQ Plot")
+hist(train_data$feature_2, n = 50, freq  =FALSE, main = "Histogram of Feature 2", border = "white", col = "steelblue")
+
+```
+
+Looking at the above feature_2 plot, it now appears that this features has a discrete number of values as opposed to being truely continouous. This will impact how this data is handled, and will also mean we don't want to remove outliers. 
+
+```{r}
+qqPlot(train_data$feature_3, main = "QQ Plot")
+#Change bin frequency for better insight into distribution. 
+hist(train_data$feature_3, n = 100, freq  =FALSE, main = "Histogram of Feature 3", border = "white", col = "steelblue")
+
+```
+
+Feature 3 appears to follow a right skewed distibution
+
+
+```{r}
+qqPlot(train_data$feature_4, main = "QQ Plot")
+hist(train_data$feature_4, n = 50, freq  =FALSE, main = "Histogram of Feature 4", border = "white", col = "steelblue")
+```
+Appears to be descrete after clearing up the outliers.
+
+```{r}
+qqPlot(train_data$feature_5, main = "QQ Plot")
+hist(train_data$feature_5, n = 50, freq  =FALSE, main = "Histogram of Feature 5", border = "white", col = "steelblue")
+```
+The histogram explains the appearence of a significant number of outliers on the original boxplot. There is a heavy concentration of data towards a single value. 
+Given this and the qq plot, I will remove the outliers as I suspect they will negatively influence any future models.
+
+```{r}
+#Feature 5
+Q_5 <- quantile(train_data$feature_5, probs=c(0.25, 0.75), na.rm = FALSE)
+iqr_5 <- IQR(train_data$feature_5)
+up_5 <- Q_4[2]+1.5*iqr_5
+low_5 <- Q_4[1] - 1.5*iqr_5
+
+#extract the outliers data
+train_data <- subset(train_data, train_data$feature_5 > low_5 & train_data$feature_5 < up_5)
+```
+
+```{r}
+qqPlot(train_data$feature_5, main = "QQ Plot")
+hist(train_data$feature_5, n = 50, freq  =FALSE, main = "Histogram of Feature 5", border = "white", col = "steelblue")
+
+```
+
+
+```{r}
+qqPlot(train_data$feature_6, main = "QQ Plot")
+hist(train_data$feature_6, n = 50, freq  =FALSE, main = "Histogram of Feature 6", border = "white", col = "steelblue")
+```
+
+Up until this point, we have looked at continuous variable distributions, now we will examine some of the categorical variables to assess their distributions.
+
+Ref: https://www.r-bloggers.com/2021/08/how-to-plot-categorical-data-in-r-quick-guide/
+
+```{r}
+
+ggplot(train_data, aes(x=reorder(feature_7,feature_7, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 7",x='Feature 7')
+
+ggplot(train_data, aes(x=reorder(feature_8,feature_8, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 8",x='Feature 8')
+```
+
+```{r}
+ggplot(train_data, aes(x=reorder(feature_9,feature_9, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 9",x='Feature 9')
+```
+```{r}
+ggplot(train_data, aes(x=reorder(feature_10,feature_10, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 10",x='Feature 10')
+```
+```{r}
+ggplot(train_data, aes(x=reorder(feature_11,feature_11, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 11",x='Feature 11')
+
+ggplot(train_data, aes(x=reorder(feature_12,feature_12, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 12",x='Feature 12')
+```
+
+```{r}
+ggplot(train_data, aes(x=reorder(feature_13,feature_13, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 13",x='Feature 13')
+
+ggplot(train_data, aes(x=reorder(feature_14,feature_14, function(x)-length(x)))) +
+geom_bar(fill='blue') +  labs(main = "Feature 14",x='Feature 14')
+
+```
+
+## Bivariate Analysis
+Moving on to bivariate analysis to see if we can find any interesting correlations.
+
+
+```{r}
+#SLOWS DOWN PROCESSING, INCLUDE IN FINAL REPORT
+pairs(train_data)
+```
+No obvious patterns emerging from the above )even when you zoom in). 
+
+Appling a broad correlation analysis
+```{r}
+cor(train_data)
+```
+
+Quite hard to read
+Applying correlation analysis - use cut off of 0.60, otherwise not really useful
+```{r}
+train_data_cor <- cor(train_data)
+high_cor <- findCorrelation(train_data_cor, cutoff = 0.6)
+high_cor
+```
+
+Feature 5 and 15, and 6 and 15 are the only pairs with a resonable correlation after inspcting column 16 (feature 15).
+-.78 correlation with feature 5 and -0.69 correlation with feature 6. 
+
+Further apply covariance to see if applicable.
+Can see some data is on a different scale so may need to normalise 
+
+```{r}
+#cov(train_data)
+```
+
+#Noramlize the data
+ # Reference: https://www.edureka.co/blog/knn-algorithm-in-r/
+```{r}
+normalize <- function(x) {
+  return ((x-min(x)) / (max(x) - min(x)))
+}
+
+```
+
+```{r}
+train_data_norm <- as.data.frame(lapply(train_data[,1:17], normalize))
+#train_data_norm
+
+test_data_norm <- as.data.frame(lapply(test_data[,1:17], normalize))
+#test_data_norm
+```
+
+
+```{r}
+#cov(train_data)
+```
+Feature 7 and 9, and features 13 and 14 are of interest. 
+
+```{r}
+table(train_data$feature_7, train_data$feature_9)
+```
+```{r}
+table(train_data$feature_13, train_data$feature_14)
+```
+
+## 2. Describe your choice of model based off of eda.
+
+I want to approach this problem form 2 different perspectives intially. I will first develop a parametric model. However as can be seen in the analysis I swicth between a generalised logistic model and a Linear Discremenant Analysis model after observing some of the eraly results, to improve performance.  
+There were a couple of reasonable correlations observed in the EDA, so I do want to see how a parametric model works. 
+I also want a apply a nonparametric approach so wil use knn. Particularly because there is quite a mix of discrete and continous variables, so I feel that may distort any underlying equation assumptions (implicit in a parametric approach). Also there are so many variables being considred, so a non parametric approach may be effective. Considiering it is a relatively small data set (not millions of rows of data) I am comfortable to computational requirements of KNN (which is greater than LDA and GLM) will not be prohibitive to employing that type of model. 
+
+After I have run both of these I will reassess and see how the different models perform. 
+
+
+##3. Develop 2 types of models (e.g. logistic regression and KNN)
+
+### Logistic regression model
+
+```{r}
+#Create factors for labels in both test and training set
+train_data$labels <- factor(train_data$labels)
+table(train_data$labels)
+test_data$labels <- factor(test_data$labels)
+table(test_data$labels)
+
+train_data_norm$labels <- factor(train_data_norm$labels)
+test_data_norm$labels <- factor(test_data_norm$labels)
+
+
+
+```
+
+
+#Logistic regression model
+```{r}
+logit <- train(labels ~., data=train_data, method = 'glm', family=binomial(link='logit'), preProcess=c('scale', 'center'))
+
+```
+
+#Summary of logit model
+```{r}
+summary(logit)
+```
+Null deviance is high, showing this model is improving on the null model (good thing)
+Also the fisher iterations at 7 are showing us that the solution is able be solved. 
+
+Confusion Matrix
+```{r}
+confusionMatrix(predict(logit, test_data[,-17]), test_data$labels)
+```
+
+
+
+Assessing the above model it is "ok". 0.79 accuracy so can somewhat predict however a high error rate. False positive results are conceningly high on this (at 43.95%)and I would like to see that reduce significantly before accepting the model. The false negative rate is better (at 17.99%) but I would like to see that reduce further. 
+
+Looking at variable importance
+```{r}
+plot(varImp(logit, scale = TRUE), main = "Variable importance for logistic regression")
+
+```
+Based off of the above variable importance graph, I'll refine the model to include the more important features.
+
+
+```{r}
+train_data_refined <- train_data[, c(4,12,14,5,13,17)]
+head(train_data_refined)
+
+test_data_refined <- test_data[,c(4,12,14,5,13, 17)]
+head(test_data_refined)
+```
+#Logistic regression model
+```{r}
+logit <- train(labels ~., data=train_data_refined, method = 'glm', family=binomial(link='logit'), preProcess=c('scale', 'center'))
+
+```
+
+
+#Summary of logit model
+```{r}
+summary(logit)
+```
+As you can see above, according to the z-scores, all of the predictor variables included were significant in influencing the response variable. 
+
+Confusion Matrix
+```{r}
+confusionMatrix(predict(logit, test_data_refined[,-17]), test_data_refined$labels)
+```
+
+Clearly a significant improvement as I remove some of the variables that have little statistical significant. (seen in z scores on the summary)
+
+Now I will work to optimise further referring to z scores.
+
+```{r}
+test_sample <- c(4,12,14,5,13,2, 17)
+train_data_refined <- train_data[, test_sample]
+head(train_data_refined)
+
+test_data_refined <- test_data[,test_sample]
+head(test_data_refined)
+
+logit <- train(labels ~., data=train_data_refined, method = 'glm', family=binomial(link='logit'), preProcess=c('scale', 'center'))
+
+summary(logit)
+confusionMatrix(predict(logit, test_data_refined[,-17]), test_data_refined$labels)
+```
+
+
+Second model, LDA - lower accuracy, but gives better specificity
+
+```{r}
+train_data_refined <- train_data
+test_data_refined <- test_data
+LDA_original <- train(labels ~., data=train_data_refined, method = "lda", preProcess=c('scale','center'))
+
+confusionMatrix(test_data_refined$labels, predict(LDA_original, test_data_refined[-17]))
+plot(varImp(LDA_original, scale = TRUE), main = "Variable importance for LDA")
+```
+
+### Refine a LDA model
+
+
+```{r}
+test_sample <- c(4,14,12,2,10,5,1,9,15,17)
+train_data_refined <- train_data[, test_sample]
+test_data_refined <- test_data[, test_sample]
+LDA_original <- train(labels ~., data=train_data_refined, method = "lda", preProcess=c('scale','center'))
+confusionMatrix(test_data_refined$labels, predict(LDA_original, test_data_refined[-10]))
+```
+
+## Second machine learning model, k nearest Neighbour 
+```{r}
+
+```
+
+
+```{r}
+#sqrt the number of samples
+(sqrt(20124))
+```
+
+```{r}
+head(test_data)
+```
+
+
+
+```{r}
+pred.knn.k5 = knn(train_data[,-17], test_data[,-17], train_data$labels, k = 5)
+table(pred.knn.k5, test_data$labels)
+confusionMatrix(table(pred.knn.k5, test_data$labels))
+```
+
+
+
+
+
+Now lets apply knn but with the most relevant factors as determined before
+
+```{r}
+
+#Subsets to remove irrelevant variables
+reduced_variables <- c(2,3,4,5,6,11,14, 15, 16)
+
+
+#Model
+pred.knn.kx = knn(train_data[,reduced_variables], test_data[,reduced_variables], train_data$labels, k = 7)
+table(pred.knn.kx, test_data$labels)
+confusionMatrix(table(pred.knn.kx, test_data$labels))
+
+```
+
+## 4. Evaluate models using selected performance measures (at least 2)
+Assessing the knn model.
+I am happy with the accuracy of this mode at 89.46%, using a subset of factors that were shown to have influence in the EDA and logistic modeling. My concern with this model is the specificity at 21.27%. This means this model is doing a good job at predicting accuratley when a customer doesn't churn (98% of the time), however it incorrectly identifies when a customer will churn, often these will actually be customers that stay. Commercially, I think this would pose a probelm for the marketing team, and I do not think it is in the best interest of the marketing team/the client to have a model that has a high degree of accuracy, but a very poor (less than 50 %) True Positive Rate. 
+
+
+After applying both models I would be in favor of using lda  as it does a better job at capturing specificity. This is really important as the data is heavily skewed toward customers that don't churn (i.e. most customers do not leave) It still performs relatively well with my final model over 89% (in the final section of this assignment). But imprtantly it enabled me to get a higher True Positive Rate. 
+
+
+
+
+## 5. Use selected model ,identify and discuss the key factors (variable importance) of the selected model
+I would suggest using a lda regression model for churn prediction purposes. 
+
+Although it was slightly lower in accuracy compared to other models I developed it had a better read on specificity. This is important as churn customers (label = 1), are the subset of interest. If they are incorrectly being classified the majority of the time (as with the other models) it would be detrimental to the marketing team in a real world application. 
+
+The initial EDA did not reveal clear correlations (beyond a couple of factors) or coverance which drove my models. As we applied the statistical analysis. 
+
+Feature_3 had the most profound effect on the models accuracy and would be the most important factor to look at for marketing. 
+Features 11,13, 1 all seemed to have an impact on the models accuracy and would be worth investigating further.I also found that although the initial EDA showed that there were significant outliers in the continuous variables. Applying the IQR range to remove outliers was actually detrimental to the overall accuracy of the model, with the exception of feature 4. This suggests to me that the extreme data in the features (except for feature 4) was actually quite important and not noise, based off of my analysis. 
+
+
+
+Below is the final model I would use:
+
+
+```{r}
+#Load in training data and inspect
+train_data <- read.csv("trainSet.csv")
+test_data <- read.csv("testSet.csv")
+
+
+#Remove outliers for Feature 4 only
+Q_4 <- quantile(train_data$feature_4, probs=c(0.25, 0.75), na.rm = FALSE)
+iqr_4 <- IQR(train_data$feature_4)
+up_4 <- Q_4[2]+1.5*iqr_4
+low_4 <- Q_4[1] - 1.5*iqr_4 
+
+train_data <- subset(train_data, train_data$feature_4 > low_4 & train_data$feature_4 < up_4)
+
+#Create factors for labels in both test and training set
+train_data$labels <- factor(train_data$labels)
+table(train_data$labels)
+test_data$labels <- factor(test_data$labels)
+table(test_data$labels)
+
+train_data_norm$labels <- factor(train_data_norm$labels)
+test_data_norm$labels <- factor(test_data_norm$labels)
+
+
+
+test_sample <- c(4,14,12,2,10,5,1,9,15,17)
+train_data_refined <- train_data[, test_sample]
+test_data_refined <- test_data[, test_sample]
+LDA_original <- train(labels ~., data=train_data_refined, method = "lda", preProcess=c('scale','center'))
+confusionMatrix(test_data_refined$labels, predict(LDA_original, test_data_refined[-10]))
+```
+
+You can see above this model has an accuracy of 89.13%. It has the strongest specificty of over 50% at 0.5663 and still strong sensitivity, over 90%. 
+
+## 6 Make suggestions/provide commercial insights to marketing based off of these findings. Assuming a non data science audience. 
+My hope for marketing is that they could apply domain knowledge to the identified factors to see what they could do to decrease the churn rate. Feature_3 is the most influential, and I would advise looking at this in the most detail. Other important features as mentioned above are features 11,13 1. 
+
+
+Refences:
+I used the below websites to help construct some of my plotting, removing outliers and knn algorithims.
+EDA - https://www.r-bloggers.com/2020/01/how-to-remove-outliers-in-r/
+https://www.r-bloggers.com/2021/08/how-to-plot-categorical-data-in-r-quick-guide/
+https://www.edureka.co/blog/knn-algorithm-in-r/
+
+
